@@ -1,0 +1,98 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#root {
+  width: 100%;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+h1 {
+  color: white;
+  margin-bottom: 2rem;
+  font-size: 3rem;
+  text-align: center;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+.status-card {
+  background: white;
+  border-radius: 8px;
+  padding: 2rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  text-align: center;
+  width: 100%;
+}
+
+.status-card p {
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.status-loading {
+  color: #667eea;
+  font-weight: 500;
+}
+
+.status-connected {
+  color: #10b981;
+  font-weight: 600;
+  font-size: 1.3rem;
+}
+
+.status-error {
+  color: #ef4444;
+  font-weight: 600;
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+}
+
+.error-message {
+  color: #6b7280;
+  font-size: 0.95rem;
+  margin: 0.5rem 0 1rem 0;
+}
+
+.hint {
+  color: #9ca3af;
+  font-size: 0.85rem;
+  font-style: italic;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+@media (max-width: 640px) {
+  h1 {
+    font-size: 2rem;
+  }
+
+  .status-card {
+    padding: 1.5rem;
+  }
+
+  .status-card p {
+    font-size: 1rem;
+  }
+}
