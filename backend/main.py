@@ -1,13 +1,16 @@
 import time
-from typing import Optional
+from typing import Optional, List
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
+from sqlalchemy.orm import Session
 
-from database import init_db
+from database import init_db, get_db
+from models import MonitoringTarget
+from schemas import TargetCreate, TargetResponse
 
 app = FastAPI(title="Network Monitor")
 
@@ -116,6 +119,42 @@ async def check_url(request: CheckRequest) -> CheckResponse:
             response_time_ms=round(elapsed_ms, 1),
             error=f"Unexpected error: {str(e)}",
         )
+
+
+# Monitoring target management endpoints
+@app.post("/targets", response_model=TargetResponse, status_code=status.HTTP_201_CREATED)
+def create_target(payload: TargetCreate, db: Session = Depends(get_db)):
+    """Create a monitoring target. Reject duplicates and validate URL scheme."""
+    # Check duplicate
+    existing = db.query(MonitoringTarget).filter(MonitoringTarget.url == payload.url).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Target URL already exists")
+
+    target = MonitoringTarget(url=payload.url)
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    return TargetResponse.from_orm(target)
+
+
+@app.get("/targets", response_model=List[TargetResponse])
+def list_targets(db: Session = Depends(get_db)):
+    """Return all monitoring targets."""
+    targets = db.query(MonitoringTarget).order_by(MonitoringTarget.id).all()
+    return [TargetResponse.from_orm(t) for t in targets]
+
+
+@app.delete("/targets/{target_id}")
+def delete_target(target_id: int, db: Session = Depends(get_db)):
+    """Delete a monitoring target; cascade deletes CheckHistory via relationship."""
+    target = db.query(MonitoringTarget).filter(MonitoringTarget.id == target_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target not found")
+
+    db.delete(target)
+    db.commit()
+    return {"detail": "deleted"}
 
 
 if __name__ == "__main__":
