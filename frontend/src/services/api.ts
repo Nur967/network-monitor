@@ -29,10 +29,16 @@ export const checkNow = async (id: string) => {
 
 export const getHistory = async (id: string): Promise<CheckRecord[]> => {
   const r = await axios.get(`${BASE}/targets/${id}/history`);
-  return r.data as CheckRecord[];
+  return r.data.checks as CheckRecord[];
 };
 
 export const getStats = async (id: string): Promise<Stats> => {
   const r = await axios.get(`${BASE}/targets/${id}/stats`);
-  return r.data as Stats;
+
+  return {
+    uptime_24h: r.data.uptime_percentage,
+    average_response_time_ms: r.data.average_response_time_ms,
+    current_status: r.data.current_status,
+    last_checked_at: r.data.last_checked_at,
+  };
 };

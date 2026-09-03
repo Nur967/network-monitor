@@ -20,4 +20,6 @@ export interface CheckRecord {
 export interface Stats {
   uptime_24h?: number | null;
   average_response_time_ms?: number | null;
+  current_status?: boolean;
+  last_checked_at?: string | null;
 }
