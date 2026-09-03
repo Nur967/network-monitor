@@ -7,7 +7,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
+from database import init_db
+
 app = FastAPI(title="Network Monitor")
+
+# Initialize database tables on startup
+@app.on_event("startup")
+def startup_event():
+    """Initialize database on application startup."""
+    init_db()
 
 # Enable CORS for local React development server
 app.add_middleware(
