@@ -7,10 +7,12 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from database import init_db, get_db
-from models import MonitoringTarget
-from schemas import TargetCreate, TargetResponse
+from models import MonitoringTarget, CheckHistory
+from schemas import TargetCreate, TargetResponse, CheckHistoryResponse, MonitoringHistoryResponse, TargetStatsResponse
+from monitoring import start_scheduler, stop_scheduler, perform_check
 
 app = FastAPI(title="Network Monitor")
 
@@ -19,6 +21,13 @@ app = FastAPI(title="Network Monitor")
 def startup_event():
     """Initialize database on application startup."""
     init_db()
+    start_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Clean up on application shutdown."""
+    stop_scheduler()
 
 # Enable CORS for local React development server
 app.add_middleware(
@@ -68,57 +77,15 @@ async def check_url(request: CheckRequest) -> CheckResponse:
     
     Returns the HTTP status code, response time, and any errors encountered.
     """
-    start_time = time.time()
+    online, status_code, response_time_ms, error = await perform_check(request.url)
     
-    try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.get(request.url, timeout=5.0)
-        
-        elapsed_ms = (time.time() - start_time) * 1000
-        
-        return CheckResponse(
-            url=request.url,
-            online=True,
-            status_code=response.status_code,
-            response_time_ms=round(elapsed_ms, 1),
-            error=None,
-        )
-    except httpx.TimeoutException:
-        elapsed_ms = (time.time() - start_time) * 1000
-        return CheckResponse(
-            url=request.url,
-            online=False,
-            status_code=None,
-            response_time_ms=round(elapsed_ms, 1),
-            error="Request timeout (5 seconds exceeded)",
-        )
-    except httpx.ConnectError:
-        elapsed_ms = (time.time() - start_time) * 1000
-        return CheckResponse(
-            url=request.url,
-            online=False,
-            status_code=None,
-            response_time_ms=round(elapsed_ms, 1),
-            error="Connection failed",
-        )
-    except httpx.RequestError as e:
-        elapsed_ms = (time.time() - start_time) * 1000
-        return CheckResponse(
-            url=request.url,
-            online=False,
-            status_code=None,
-            response_time_ms=round(elapsed_ms, 1),
-            error=f"Request failed: {str(e)}",
-        )
-    except Exception as e:
-        elapsed_ms = (time.time() - start_time) * 1000
-        return CheckResponse(
-            url=request.url,
-            online=False,
-            status_code=None,
-            response_time_ms=round(elapsed_ms, 1),
-            error=f"Unexpected error: {str(e)}",
-        )
+    return CheckResponse(
+        url=request.url,
+        online=online,
+        status_code=status_code,
+        response_time_ms=response_time_ms,
+        error=error,
+    )
 
 
 # Monitoring target management endpoints
@@ -155,6 +122,98 @@ def delete_target(target_id: int, db: Session = Depends(get_db)):
     db.delete(target)
     db.commit()
     return {"detail": "deleted"}
+
+
+@app.post("/targets/{target_id}/check", response_model=CheckHistoryResponse)
+async def check_target(target_id: int, db: Session = Depends(get_db)):
+    """
+    Immediately check a specific monitoring target.
+    Store the result in CheckHistory and return it.
+    """
+    target = db.query(MonitoringTarget).filter(MonitoringTarget.id == target_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target not found")
+    
+    online, status_code, response_time_ms, error = await perform_check(target.url)
+    
+    check_record = CheckHistory(
+        target_id=target_id,
+        online=online,
+        status_code=status_code,
+        response_time_ms=response_time_ms,
+        error=error,
+    )
+    db.add(check_record)
+    db.commit()
+    db.refresh(check_record)
+    
+    return CheckHistoryResponse.from_orm(check_record)
+
+
+@app.get("/targets/{target_id}/history", response_model=MonitoringHistoryResponse)
+def get_target_history(target_id: int, db: Session = Depends(get_db)):
+    """
+    Get the latest 50 checks for a monitoring target.
+    Ordered newest first.
+    """
+    target = db.query(MonitoringTarget).filter(MonitoringTarget.id == target_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target not found")
+    
+    checks = db.query(CheckHistory).filter(
+        CheckHistory.target_id == target_id
+    ).order_by(desc(CheckHistory.checked_at)).limit(50).all()
+    
+    return MonitoringHistoryResponse(
+        target_id=target_id,
+        checks=[CheckHistoryResponse.from_orm(c) for c in checks],
+    )
+
+
+@app.get("/targets/{target_id}/stats", response_model=TargetStatsResponse)
+def get_target_stats(target_id: int, db: Session = Depends(get_db)):
+    """
+    Get statistics for a monitoring target.
+    Includes total checks, successful checks, uptime percentage, average response time.
+    """
+    target = db.query(MonitoringTarget).filter(MonitoringTarget.id == target_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target not found")
+    
+    checks = db.query(CheckHistory).filter(
+        CheckHistory.target_id == target_id
+    ).all()
+    
+    total_checks = len(checks)
+    
+    if total_checks == 0:
+        return TargetStatsResponse(
+            target_id=target_id,
+            total_checks=0,
+            successful_checks=0,
+            uptime_percentage=0.0,
+            average_response_time_ms=None,
+            last_checked_at=None,
+            current_status=False,
+        )
+    
+    successful_checks = len([c for c in checks if c.online])
+    uptime_percentage = round((successful_checks / total_checks) * 100, 2)
+    
+    response_times = [c.response_time_ms for c in checks if c.response_time_ms is not None]
+    average_response_time_ms = round(sum(response_times) / len(response_times), 1) if response_times else None
+    
+    last_check = max(checks, key=lambda c: c.checked_at)
+    
+    return TargetStatsResponse(
+        target_id=target_id,
+        total_checks=total_checks,
+        successful_checks=successful_checks,
+        uptime_percentage=uptime_percentage,
+        average_response_time_ms=average_response_time_ms,
+        last_checked_at=last_check.checked_at,
+        current_status=last_check.online,
+    )
 
 
 if __name__ == "__main__":
