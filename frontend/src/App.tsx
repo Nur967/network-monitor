@@ -1,55 +1,99 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import "./index.css";
+import AddTargetForm from "./components/AddTargetForm";
+import TargetCard from "./components/TargetCard";
+import { getTargets, getHealth } from "./services/api";
+import { Target } from "./types";
 
 function App() {
-  const [backendStatus, setBackendStatus] = useState<
-    "loading" | "connected" | "error"
-  >("loading");
+  const [backendStatus, setBackendStatus] = useState<"loading" | "connected" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [targets, setTargets] = useState<Target[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const loadTargets = async () => {
+    setLoading(true);
+    try {
+      const res = await getTargets();
+      setTargets(res);
+    } catch (err: any) {
+      setErrorMessage(err?.message || "Failed to load targets");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const checkBackend = async () => {
+    const init = async () => {
       try {
-        const response = await axios.get("http://localhost:8000/health");
-        if (response.data.status === "ok") {
-          setBackendStatus("connected");
+        const h = await getHealth();
+        if (h.status === "ok") setBackendStatus("connected");
+        else {
+          setBackendStatus("error");
+          setErrorMessage("Backend unhealthy");
         }
-      } catch (error) {
+      } catch (err: any) {
         setBackendStatus("error");
-        if (axios.isAxiosError(error)) {
-          setErrorMessage(
-            error.message || "Failed to connect to backend"
-          );
-        } else {
-          setErrorMessage("Failed to connect to backend");
-        }
+        setErrorMessage(err?.message || "Failed to reach backend");
       }
+
+      await loadTargets();
     };
 
-    checkBackend();
+    init();
+
+    const interval = setInterval(() => {
+      // refresh lightweight list of targets
+      loadTargets();
+    }, 60_000);
+
+    return () => clearInterval(interval);
   }, []);
 
-  return (
-    <div className="container">
-      <h1>Network Monitor</h1>
+  const onCreated = () => {
+    loadTargets();
+  };
 
-      <div className="status-card">
-        {backendStatus === "loading" && (
-          <p className="status-loading">Checking backend connection...</p>
-        )}
-        {backendStatus === "connected" && (
-          <p className="status-connected">✓ Backend connected</p>
-        )}
-        {backendStatus === "error" && (
-          <>
-            <p className="status-error">✗ Backend connection failed</p>
-            <p className="error-message">{errorMessage}</p>
-            <p className="hint">
-              Make sure the backend is running on http://localhost:8000
-            </p>
-          </>
-        )}
-      </div>
+  const onDeleted = (id: string) => {
+    setTargets((t) => t.filter((x) => x.id !== id));
+  };
+
+  const onUpdated = (updated: Target) => {
+    setTargets((t) => t.map((x) => (x.id === updated.id ? updated : x)));
+  };
+
+  return (
+    <div className="app-root">
+      <header className="app-header">
+        <div>
+          <h1>Network Monitor</h1>
+          <p className="subtitle">Real-time uptime and response monitoring</p>
+        </div>
+        <div className="backend-status">
+          {backendStatus === "loading" && <span className="status loading">Checking...</span>}
+          {backendStatus === "connected" && <span className="status connected">⦿ Connected</span>}
+          {backendStatus === "error" && <span className="status error">✖ {errorMessage || "Backend error"}</span>}
+        </div>
+      </header>
+
+      <main className="main">
+        <section className="controls">
+          <AddTargetForm onCreated={onCreated} />
+        </section>
+
+        <section className="targets-section">
+          {loading && <p className="info">Loading targets...</p>}
+          {!loading && targets.length === 0 && <p className="info">No targets yet. Add a URL to start monitoring.</p>}
+
+          <div className="grid">
+            {targets.map((t) => (
+              <TargetCard key={t.id} target={t} onDeleted={onDeleted} onUpdated={onUpdated} />
+            ))}
+          </div>
+        </section>
+      </main>
+
+      <footer className="footer">© Network Monitor</footer>
     </div>
   );
 }

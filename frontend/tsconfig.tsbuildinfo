@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/components/addtargetform.tsx","./src/components/responsechart.tsx","./src/components/targetcard.tsx","./src/services/api.ts"],"version":"5.9.3"}
